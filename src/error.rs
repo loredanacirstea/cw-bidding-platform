@@ -1,4 +1,4 @@
-use cosmwasm_std::{StdError, Uint128, OverflowError};
+use cosmwasm_std::{StdError, Uint128, OverflowError, DecimalRangeExceeded, CheckedFromRatioError};
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
@@ -8,6 +8,12 @@ pub enum ContractError {
 
     #[error("{0}")]
     Overflow(#[from] OverflowError),
+
+    #[error("{0}")]
+    DecimalRangeExceeded(#[from] DecimalRangeExceeded),
+
+    #[error("{0}")]
+    CheckedFromRatioError(#[from] CheckedFromRatioError),
 
     #[error("Unauthorized - only {owner} can call it")]
     Unauthorized { owner: String },

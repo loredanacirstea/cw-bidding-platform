@@ -72,7 +72,7 @@ pub mod exec {
     use std::ops::{Sub, Add};
 
     use cosmwasm_std::{
-        DepsMut, MessageInfo, Response, BankMsg, coins, Uint128,
+        DepsMut, MessageInfo, Response, BankMsg, coins, Uint128, Decimal,
     };
 
     use crate::error::ContractError;
@@ -93,21 +93,25 @@ pub mod exec {
 
         let amount = info.funds.iter().find(|coin| coin.denom == BID_DENOM.to_string());
 
-        let amount_bid = match amount {
+        let coin_bid = match amount {
             Some(i) => i,
             None => return Err(ContractError::InvalidBidZeroAmount {}),
         };
 
-        // TODO commission
+        let amount_commission = Decimal::from_atomics(coin_bid.amount, 0)?
+            .checked_div(state.bid_comission)?
+            .ceil()
+            .atomics();
 
-        user_bid = user_bid.checked_add(amount_bid.amount)?;
+        let amount_bid = coin_bid.amount.sub(amount_commission);
+        user_bid = user_bid.checked_add(amount_bid)?;
 
         if !winner.amount.lt(&user_bid) {
             let required_amount = winner.amount
                 .sub(user_bid)
-                .add(amount_bid.amount)
-                .add(Uint128::from(1u128));
-            return Err(ContractError::InvalidBidAmount {amount: amount_bid.amount, required_amount})
+                .add(amount_bid)
+                .add(Uint128::one());
+            return Err(ContractError::InvalidBidAmount {amount: amount_bid, required_amount})
         }
 
         BIDS.save(deps.storage, &info.sender, &user_bid)?;
@@ -116,7 +120,14 @@ pub mod exec {
         winner.address = info.sender.clone();
         WINNER.save(deps.storage, &winner)?;
 
+        // Send winner's amount to owner
+        let bank_msg = BankMsg::Send {
+            to_address: state.owner.to_string(),
+            amount: coins(amount_commission.u128(), BID_DENOM),
+        };
+
         resp = resp
+            .add_message(bank_msg)
             .add_attribute("action", "bid")
             .add_attribute("bidder", info.sender.as_str())
             .add_attribute("amount", info.funds[0].to_string());
@@ -144,7 +155,7 @@ pub mod exec {
         let winner = WINNER.load(deps.storage)?;
 
         // Store 0 for winner's bid
-        BIDS.save(deps.storage, &winner.address, &Uint128::from(0u128))?;
+        BIDS.save(deps.storage, &winner.address, &Uint128::zero())?;
 
         // Send winner's amount to owner
         let bank_msg = BankMsg::Send {
@@ -179,7 +190,7 @@ pub mod exec {
             .unwrap_or_default();
 
         // Store 0 for bidder
-        BIDS.save(deps.storage, &info.sender, &Uint128::from(0u128))?;
+        BIDS.save(deps.storage, &info.sender, &Uint128::zero())?;
 
         // Send funds back to bidder
         let bank_msg = BankMsg::Send {
