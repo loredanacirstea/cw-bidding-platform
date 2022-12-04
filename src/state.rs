@@ -1,4 +1,4 @@
-use cosmwasm_std::{Addr, Decimal};
+use cosmwasm_std::{Addr, Decimal, Uint128};
 use cw_storage_plus::{Item, Map};
 use serde::{Deserialize, Serialize};
 
@@ -13,10 +13,10 @@ pub struct State {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Winner {
     pub address: Addr,
-    pub amount: u64,
+    pub amount: Uint128,
 }
 
-// pub const BID_DENOM: &str = "ATOM";
+pub const BID_DENOM: &str = "ATOM";
 pub const STATE: Item<State> = Item::new("state");
-pub const BIDS: Map<&Addr, u64> = Map::new("bids");
+pub const BIDS: Map<&Addr, Uint128> = Map::new("bids");
 pub const WINNER: Item<Winner> = Item::new("winner");

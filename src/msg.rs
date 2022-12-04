@@ -1,4 +1,4 @@
-use cosmwasm_std::{Addr, Decimal};
+use cosmwasm_std::{Addr, Decimal, Uint128};
 use cosmwasm_schema::{cw_serde, QueryResponses};
 
 #[cw_serde]
@@ -34,19 +34,19 @@ pub enum ExecMsg {
     Close {},
     Retract {
         #[serde(default)]
-        receiver: String,
+        receiver: Option<String>,
     },
 }
 
 #[cw_serde]
 pub struct TotalUserBidResp {
-    pub amount: u64,
+    pub amount: Uint128,
 }
 
 #[cw_serde]
 pub struct HighestBidResp {
     pub address: Addr,
-    pub amount: u64,
+    pub amount: Uint128,
 }
 
 #[cw_serde]
@@ -57,5 +57,5 @@ pub struct IsClosedResp {
 #[cw_serde]
 pub struct WinnerResp {
     pub address: Addr,
-    pub amount: u64,
+    pub amount: Uint128,
 }

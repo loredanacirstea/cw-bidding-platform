@@ -1,4 +1,4 @@
-use cosmwasm_std::StdError;
+use cosmwasm_std::{StdError, Uint128, OverflowError};
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
@@ -6,15 +6,21 @@ pub enum ContractError {
     #[error("{0}")]
     Std(#[from] StdError),
 
+    #[error("{0}")]
+    Overflow(#[from] OverflowError),
+
     #[error("Unauthorized - only {owner} can call it")]
     Unauthorized { owner: String },
 
-    #[error("Invalid coin denom: {denom}. Send ATOM")]
-    InvalidCoinDenom { denom: String },
+    #[error("Unauthorized - bid is closed")]
+    UnauthorizedWhileClosed {},
 
-    #[error("Invalid bid: {amount}. Send at least {required_amount}")]
-    InvalidBid { amount: u64, required_amount: u64 },
+    #[error("Unauthorized - bid is open")]
+    UnauthorizedWhileOpen {},
 
-    #[error("Bidding is closed.")]
-    UnauthorizedBid {},
+    #[error("Invalid bid amount. Found 0 ATOM")]
+    InvalidBidZeroAmount {},
+
+    #[error("Invalid bid - sent {amount}, required at least {required_amount}")]
+    InvalidBidAmount { amount: Uint128, required_amount: Uint128 },
 }

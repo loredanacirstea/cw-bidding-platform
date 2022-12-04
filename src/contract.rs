@@ -1,9 +1,5 @@
-use cosmwasm_std::{Addr, DepsMut, Response, StdResult, Decimal};
+use cosmwasm_std::{DepsMut, Response, StdResult, Decimal, MessageInfo};
 use cw2::{set_contract_version};
-// use cw_storage_plus::Item;
-// use serde::{Deserialize, Serialize};
-
-// use crate::error::ContractError;
 use crate::state::{State, STATE};
 
 const CONTRACT_NAME: &str = env!("CARGO_PKG_NAME");
@@ -11,17 +7,23 @@ const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub fn instantiate(
     deps: DepsMut,
+    info: MessageInfo,
     commodity_uri: String,
     bid_comission: Decimal,
-    owner: Addr,
+    owner: Option<String>,
 ) -> StdResult<Response> {
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+
+    let contract_owner = match owner {
+        Some(i) => deps.api.addr_validate(&i)?,
+        None => info.sender,
+    };
 
     STATE.save(
         deps.storage,
         &State {
             commodity_uri,
-            owner,
+            owner: contract_owner,
             bid_comission,
             is_closed: false,
         },
@@ -67,20 +69,131 @@ pub mod query {
 }
 
 pub mod exec {
-    // use cosmwasm_std::{
-    //     to_binary, DepsMut, Env, MessageInfo, Response, StdResult,
-    // };
+    use std::ops::{Sub, Add};
 
-    // use crate::error::ContractError;
-    // use crate::msg::ExecMsg;
-    // use crate::state::{STATE};
+    use cosmwasm_std::{
+        DepsMut, MessageInfo, Response, BankMsg, coins, Uint128,
+    };
 
-    // pub fn bid(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
-    // }
+    use crate::error::ContractError;
+    use crate::state::{STATE, WINNER, BIDS, BID_DENOM};
 
-    // pub fn close(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
-    // }
+    pub fn bid(deps: DepsMut, info: MessageInfo) -> Result<Response, ContractError> {
+        let state = STATE.load(deps.storage)?;
+        let mut resp = Response::new();
 
-    // pub fn retract(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
-    // }
+        if state.is_closed {
+            return Err(ContractError::UnauthorizedWhileClosed {});
+        }
+
+        let mut winner = WINNER.load(deps.storage)?;
+        let mut user_bid = BIDS
+            .may_load(deps.storage, &info.sender)?
+            .unwrap_or_default();
+
+        let amount = info.funds.iter().find(|coin| coin.denom == BID_DENOM.to_string());
+
+        let amount_bid = match amount {
+            Some(i) => i,
+            None => return Err(ContractError::InvalidBidZeroAmount {}),
+        };
+
+        // TODO commission
+
+        user_bid = user_bid.checked_add(amount_bid.amount)?;
+
+        if !winner.amount.lt(&user_bid) {
+            let required_amount = winner.amount
+                .sub(user_bid)
+                .add(amount_bid.amount)
+                .add(Uint128::from(1u128));
+            return Err(ContractError::InvalidBidAmount {amount: amount_bid.amount, required_amount})
+        }
+
+        BIDS.save(deps.storage, &info.sender, &user_bid)?;
+
+        winner.amount = user_bid;
+        winner.address = info.sender.clone();
+        WINNER.save(deps.storage, &winner)?;
+
+        resp = resp
+            .add_attribute("action", "bid")
+            .add_attribute("bidder", info.sender.as_str())
+            .add_attribute("amount", info.funds[0].to_string());
+
+        Ok(resp)
+    }
+
+    pub fn close(deps: DepsMut, info: MessageInfo) -> Result<Response, ContractError> {
+        let mut state = STATE.load(deps.storage)?;
+        let mut resp = Response::new();
+
+        if state.is_closed {
+            return Err(ContractError::UnauthorizedWhileClosed {});
+        }
+
+        if state.owner != info.sender {
+            return Err(ContractError::Unauthorized {
+                owner: state.owner.to_string(),
+            });
+        }
+
+        state.is_closed = true;
+        STATE.save(deps.storage, &state)?;
+
+        let winner = WINNER.load(deps.storage)?;
+
+        // Store 0 for winner's bid
+        BIDS.save(deps.storage, &winner.address, &Uint128::from(0u128))?;
+
+        // Send winner's amount to owner
+        let bank_msg = BankMsg::Send {
+            to_address: state.owner.to_string(),
+            amount: coins(winner.amount.u128(), BID_DENOM),
+        };
+
+        resp = resp
+            .add_message(bank_msg)
+            .add_attribute("action", "close")
+            .add_attribute("winner", winner.address.as_str())
+            .add_attribute("amount", winner.amount.to_string());
+
+        Ok(resp)
+    }
+
+    pub fn retract(deps: DepsMut, info: MessageInfo, receiver: Option<String>) -> Result<Response, ContractError> {
+        let state = STATE.load(deps.storage)?;
+        let mut resp = Response::new();
+
+        if state.is_closed == false {
+            return Err(ContractError::UnauthorizedWhileOpen {});
+        }
+
+        let funds_receiver = match receiver {
+            Some(i) => deps.api.addr_validate(&i)?,
+            None => info.sender.clone(),
+        };
+
+        let amount = BIDS
+            .may_load(deps.storage, &info.sender)?
+            .unwrap_or_default();
+
+        // Store 0 for bidder
+        BIDS.save(deps.storage, &info.sender, &Uint128::from(0u128))?;
+
+        // Send funds back to bidder
+        let bank_msg = BankMsg::Send {
+            to_address: funds_receiver.to_string(),
+            amount: coins(amount.u128(), BID_DENOM),
+        };
+
+        resp = resp
+            .add_message(bank_msg)
+            .add_attribute("action", "retract")
+            .add_attribute("bidder", info.sender.as_str())
+            .add_attribute("receiver", funds_receiver.as_str())
+            .add_attribute("amount", amount.to_string());
+
+        Ok(resp)
+    }
 }
