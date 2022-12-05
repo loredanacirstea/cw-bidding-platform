@@ -14,11 +14,10 @@ pub struct InstantiateMsg {
 pub enum QueryMsg {
     #[returns(TotalUserBidResp)]
     TotalUserBid {
-        // #[serde(default)]
         address: String,
     },
 
-    #[returns(HighestBidResp)]
+    #[returns(Option<HighestBidResp>)]
     HighestBid {},
 
     #[returns(IsClosedResp)]
@@ -33,13 +32,13 @@ pub enum ExecMsg {
     Bid {},
     Close {},
     Retract {
-        #[serde(default)]
         receiver: Option<String>,
     },
 }
 
 #[cw_serde]
 pub struct TotalUserBidResp {
+    #[serde(default)]
     pub amount: Uint128,
 }
 

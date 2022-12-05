@@ -29,4 +29,7 @@ pub enum ContractError {
 
     #[error("Invalid bid - sent {amount}, required at least {required_amount}")]
     InvalidBidAmount { amount: Uint128, required_amount: Uint128 },
+
+    #[error("Invalid retract amount. Found 0 ATOM")]
+    InvalidRetractZeroAmount {},
 }

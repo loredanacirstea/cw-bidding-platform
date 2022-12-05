@@ -47,9 +47,12 @@ pub mod query {
     }
 
     // we show this even if bid is closed
-    pub fn highest_bid(deps: Deps) -> StdResult<HighestBidResp> {
-        let winner = WINNER.load(deps.storage)?;
-        Ok(HighestBidResp { address: winner.address, amount: winner.amount })
+    pub fn highest_bid(deps: Deps) -> StdResult<Option<HighestBidResp>> {
+        let winner = WINNER.may_load(deps.storage)?;
+        match winner {
+            Some(i) => Ok(Some(HighestBidResp { address: i.address, amount: i.amount })),
+            None => Ok(None),
+        }
     }
 
     pub fn is_closed(deps: Deps) -> StdResult<IsClosedResp> {
@@ -59,24 +62,28 @@ pub mod query {
 
     pub fn winner(deps: Deps) -> StdResult<Option<WinnerResp>> {
         let closed = STATE.load(deps.storage)?.is_closed;
-        if closed == true {
+        if closed == false {
             return Ok(None);
         }
 
-        let winner = WINNER.load(deps.storage)?;
-        Ok(Some(WinnerResp { address: winner.address, amount: winner.amount }))
+        let winner = WINNER.may_load(deps.storage)?;
+        match winner {
+            Some(i) => Ok(Some(WinnerResp { address: i.address, amount: i.amount })),
+            None => Ok(None),
+        }
     }
 }
 
 pub mod exec {
     use std::ops::{Sub, Add};
+    use std::str::FromStr;
 
     use cosmwasm_std::{
         DepsMut, MessageInfo, Response, BankMsg, coins, Uint128, Decimal,
     };
 
     use crate::error::ContractError;
-    use crate::state::{STATE, WINNER, BIDS, BID_DENOM};
+    use crate::state::{STATE, WINNER, BIDS, BID_DENOM, Winner};
 
     pub fn bid(deps: DepsMut, info: MessageInfo) -> Result<Response, ContractError> {
         let state = STATE.load(deps.storage)?;
@@ -86,7 +93,11 @@ pub mod exec {
             return Err(ContractError::UnauthorizedWhileClosed {});
         }
 
-        let mut winner = WINNER.load(deps.storage)?;
+        let current_winner = WINNER.may_load(deps.storage)?;
+        let winner_amount = match current_winner {
+            Some(i) => i.amount,
+            None => Uint128::zero(),
+        };
         let mut user_bid = BIDS
             .may_load(deps.storage, &info.sender)?
             .unwrap_or_default();
@@ -98,16 +109,16 @@ pub mod exec {
             None => return Err(ContractError::InvalidBidZeroAmount {}),
         };
 
-        let amount_commission = Decimal::from_atomics(coin_bid.amount, 0)?
-            .checked_div(state.bid_comission)?
-            .ceil()
-            .atomics();
+        let commission = Decimal::from_atomics(coin_bid.amount, 0)?
+            .checked_mul(state.bid_comission)?
+            .ceil();
 
+        let amount_commission = Uint128::from_str(&commission.to_string())?;
         let amount_bid = coin_bid.amount.sub(amount_commission);
         user_bid = user_bid.checked_add(amount_bid)?;
 
-        if !winner.amount.lt(&user_bid) {
-            let required_amount = winner.amount
+        if !winner_amount.lt(&user_bid) {
+            let required_amount = winner_amount
                 .sub(user_bid)
                 .add(amount_bid)
                 .add(Uint128::one());
@@ -116,8 +127,7 @@ pub mod exec {
 
         BIDS.save(deps.storage, &info.sender, &user_bid)?;
 
-        winner.amount = user_bid;
-        winner.address = info.sender.clone();
+        let winner = Winner{amount: user_bid, address: info.sender.clone()};
         WINNER.save(deps.storage, &winner)?;
 
         // Send winner's amount to owner
@@ -152,22 +162,29 @@ pub mod exec {
         state.is_closed = true;
         STATE.save(deps.storage, &state)?;
 
-        let winner = WINNER.load(deps.storage)?;
 
-        // Store 0 for winner's bid
-        BIDS.save(deps.storage, &winner.address, &Uint128::zero())?;
+        let winner = WINNER.may_load(deps.storage)?;
+        match winner {
+            Some(i) => {
+                // Store 0 for winner's bid
+                BIDS.save(deps.storage, &i.address, &Uint128::zero())?;
 
-        // Send winner's amount to owner
-        let bank_msg = BankMsg::Send {
-            to_address: state.owner.to_string(),
-            amount: coins(winner.amount.u128(), BID_DENOM),
-        };
-
-        resp = resp
-            .add_message(bank_msg)
-            .add_attribute("action", "close")
-            .add_attribute("winner", winner.address.as_str())
-            .add_attribute("amount", winner.amount.to_string());
+                // Send winner's amount to owner
+                let bank_msg = BankMsg::Send {
+                    to_address: state.owner.to_string(),
+                    amount: coins(i.amount.u128(), BID_DENOM),
+                };
+                resp = resp
+                    .add_message(bank_msg)
+                    .add_attribute("action", "close")
+                    .add_attribute("winner", i.address.as_str())
+                    .add_attribute("amount", i.amount.to_string());
+            },
+            None => {
+                resp = resp
+                    .add_attribute("action", "close")
+            },
+        }
 
         Ok(resp)
     }
@@ -188,6 +205,10 @@ pub mod exec {
         let amount = BIDS
             .may_load(deps.storage, &info.sender)?
             .unwrap_or_default();
+
+        if amount.is_zero() {
+            return Err(ContractError::InvalidRetractZeroAmount {});
+        }
 
         // Store 0 for bidder
         BIDS.save(deps.storage, &info.sender, &Uint128::zero())?;
