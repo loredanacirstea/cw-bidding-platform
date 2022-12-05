@@ -93,6 +93,10 @@ pub mod exec {
             return Err(ContractError::UnauthorizedWhileClosed {});
         }
 
+        if state.owner == info.sender {
+            return Err(ContractError::Unauthorized {});
+        }
+
         let current_winner = WINNER.may_load(deps.storage)?;
         let winner_amount = match current_winner {
             Some(i) => i.amount,
@@ -109,6 +113,7 @@ pub mod exec {
             None => return Err(ContractError::InvalidBidZeroAmount {}),
         };
 
+        // Calculate owner's commission from bid amount
         let commission = Decimal::from_atomics(coin_bid.amount, 0)?
             .checked_mul(state.bid_comission)?
             .ceil();
@@ -117,6 +122,7 @@ pub mod exec {
         let amount_bid = coin_bid.amount.sub(amount_commission);
         user_bid = user_bid.checked_add(amount_bid)?;
 
+        // Only accept bids higher than current winner
         if !winner_amount.lt(&user_bid) {
             let required_amount = winner_amount
                 .sub(user_bid)
@@ -125,12 +131,12 @@ pub mod exec {
             return Err(ContractError::InvalidBidAmount {amount: amount_bid, required_amount})
         }
 
+        // Save the bid & update winner
         BIDS.save(deps.storage, &info.sender, &user_bid)?;
-
         let winner = Winner{amount: user_bid, address: info.sender.clone()};
         WINNER.save(deps.storage, &winner)?;
 
-        // Send winner's amount to owner
+        // Send bidder's commission to owner
         let bank_msg = BankMsg::Send {
             to_address: state.owner.to_string(),
             amount: coins(amount_commission.u128(), BID_DENOM),
@@ -154,15 +160,14 @@ pub mod exec {
         }
 
         if state.owner != info.sender {
-            return Err(ContractError::Unauthorized {
-                owner: state.owner.to_string(),
-            });
+            return Err(ContractError::Unauthorized {});
         }
 
+        // Save state as closed
         state.is_closed = true;
         STATE.save(deps.storage, &state)?;
 
-
+        // If there is a winner, send the total bid amount to owner
         let winner = WINNER.may_load(deps.storage)?;
         match winner {
             Some(i) => {

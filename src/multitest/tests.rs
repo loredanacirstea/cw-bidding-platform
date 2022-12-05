@@ -39,10 +39,10 @@ fn query_highest_bid_resp() {
 
     let mut app = App::new(|router, _api, storage| {
         router.bank
-            .init_balance(storage, &sender1, coins(100, BID_DENOM))
+            .init_balance(storage, &sender1, bid_amount1.clone())
             .unwrap();
         router.bank
-            .init_balance(storage, &sender2, coins(200, BID_DENOM))
+            .init_balance(storage, &sender2, bid_amount2.clone())
             .unwrap();
     });
     let code_id = BiddingContract::store_code(&mut app);
@@ -65,7 +65,7 @@ fn query_is_closed() {
     let mut app = App::new(|router, _api, storage| {
         router
             .bank
-            .init_balance(storage, &sender1, coins(100, BID_DENOM))
+            .init_balance(storage, &sender1, bid_amount1.clone())
             .unwrap();
     });
     let code_id = BiddingContract::store_code(&mut app);
@@ -91,10 +91,10 @@ fn query_winner() {
 
     let mut app = App::new(|router, _api, storage| {
         router.bank
-            .init_balance(storage, &sender1, coins(100, BID_DENOM))
+            .init_balance(storage, &sender1, bid_amount1.clone())
             .unwrap();
         router.bank
-            .init_balance(storage, &sender2, coins(200, BID_DENOM))
+            .init_balance(storage, &sender2, bid_amount2.clone())
             .unwrap();
     });
     let code_id = BiddingContract::store_code(&mut app);
@@ -115,6 +115,43 @@ fn query_winner() {
 }
 
 #[test]
+fn bid() {
+    let owner = Addr::unchecked("owner");
+    let sender1 = Addr::unchecked("alex");
+    let sender2 = Addr::unchecked("anna");
+
+    let mut app = App::new(|router, _api, storage| {
+        router.bank
+            .init_balance(storage, &owner, coins(100u128, BID_DENOM))
+            .unwrap();
+        router.bank
+            .init_balance(storage, &sender1, coins(100u128, BID_DENOM))
+            .unwrap();
+        router.bank
+            .init_balance(storage, &sender2, coins(100u128, BID_DENOM))
+            .unwrap();
+    });
+    let code_id = BiddingContract::store_code(&mut app);
+    let contract = BiddingContract::get_default_contract(&mut app, code_id, &owner).unwrap();
+
+    let err = contract.bid(&mut app, &owner, &coins(10u128, BID_DENOM)).unwrap_err();
+    assert_eq!(
+        err,
+        ContractError::Unauthorized {},
+    );
+
+    contract.bid(&mut app, &sender1, &coins(10u128, BID_DENOM)).unwrap();
+    contract.bid(&mut app, &sender2, &coins(20u128, BID_DENOM)).unwrap();
+
+    let err = contract.bid(&mut app, &sender1, &coins(10u128, BID_DENOM)).unwrap_err();
+    assert_eq!(
+        err,
+        ContractError::InvalidBidAmount {amount: Uint128::from(9u128), required_amount: Uint128::from(10u128)},
+    );
+
+}
+
+#[test]
 fn close() {
     let owner = Addr::unchecked("owner");
     let sender1 = Addr::unchecked("alex");
@@ -124,10 +161,10 @@ fn close() {
 
     let mut app = App::new(|router, _api, storage| {
         router.bank
-            .init_balance(storage, &sender1, coins(100, BID_DENOM))
+            .init_balance(storage, &sender1, bid_amount1.clone())
             .unwrap();
         router.bank
-            .init_balance(storage, &sender2, coins(200, BID_DENOM))
+            .init_balance(storage, &sender2, bid_amount2.clone())
             .unwrap();
     });
     let code_id = BiddingContract::store_code(&mut app);
@@ -153,10 +190,10 @@ fn retract() {
 
     let mut app = App::new(|router, _api, storage| {
         router.bank
-            .init_balance(storage, &sender1, coins(100, BID_DENOM))
+            .init_balance(storage, &sender1, bid_amount1.clone())
             .unwrap();
         router.bank
-            .init_balance(storage, &sender2, coins(200, BID_DENOM))
+            .init_balance(storage, &sender2, bid_amount2.clone())
             .unwrap();
     });
     let code_id = BiddingContract::store_code(&mut app);

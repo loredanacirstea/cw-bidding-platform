@@ -15,8 +15,8 @@ pub enum ContractError {
     #[error("{0}")]
     CheckedFromRatioError(#[from] CheckedFromRatioError),
 
-    #[error("Unauthorized - only {owner} can call it")]
-    Unauthorized { owner: String },
+    #[error("Unauthorized")]
+    Unauthorized {},
 
     #[error("Unauthorized - bid is closed")]
     UnauthorizedWhileClosed {},
